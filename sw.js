@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pl-v7';
+const CACHE_NAME = 'pl-v8';
 const FILES = [
   './',
   './index.html',

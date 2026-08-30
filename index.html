@@ -117,6 +117,11 @@
   .sub-label{font-size:11px; color:var(--text-dim); margin-top:8px;}
   .link-danger{background:none; border:none; color:var(--text-dim);
     font-size:11px; padding:6px 0 0; text-decoration:underline;}
+  .goal-actions{display:flex; gap:6px; margin-top:10px;
+    padding-top:9px; border-top:1px solid var(--line);}
+  .goal-actions button{flex:1; background:transparent; border:1px solid var(--line);
+    color:var(--text-dim); font-size:11px; padding:7px 4px;}
+  .goal-actions button.danger{border-color:var(--fail); color:var(--fail);}
 
   .log-row{display:flex; justify-content:space-between; align-items:center;
     padding:9px 0; border-bottom:1px solid var(--line); font-size:13px; gap:8px;}
@@ -198,11 +203,6 @@
     <div class="card" id="weekCard">
       <h3 class="sec-head" style="color:var(--amber);">どの週を記録しますか？</h3>
       <p class="muted" style="margin:0 0 2px;">選んだ週に対して、下の習慣目標の達成／失敗を記録します。</p>
-
-      <div class="seg" id="weekQuick" style="margin-top:10px;">
-        <button id="quickLastWeek" onclick="jumpWeek('last')">先週</button>
-        <button id="quickThisWeek" onclick="jumpWeek('this')">今週</button>
-      </div>
 
       <div class="week-nav">
         <button onclick="moveWeek(-1)" aria-label="前の週">◀</button>
@@ -321,7 +321,7 @@
     <input id="newGoalTitle" placeholder="例：朝活週2回 / TOEIC800点">
     <div class="btn-row">
       <button class="btn-ghost" onclick="closeModal('addGoalModal')">キャンセル</button>
-      <button class="btn-main" onclick="submitNewGoal()">追加する</button>
+      <button class="btn-main" id="goalSubmitBtn" onclick="submitNewGoal()">追加する</button>
     </div>
   </div>
 </div>
@@ -707,10 +707,6 @@ function renderWeekNav(){
     `${SELECTED_WEEK.replace(/-/g,'/')} の週`;
   document.getElementById('weekNextBtn').disabled = (SELECTED_WEEK >= thisWeek);
 
-  // 先週／今週のクイックボタン
-  document.getElementById('quickLastWeek').classList.toggle('active', SELECTED_WEEK === lastWeek);
-  document.getElementById('quickThisWeek').classList.toggle('active', SELECTED_WEEK === thisWeek);
-
   const habits = goalsOf(TARGET_UID).filter(g=>g.type==='habit');
   const weeks = recentWeeks(WEEK_WINDOW);
   const strip = document.getElementById('weekStrip');
@@ -811,8 +807,11 @@ function moveWeek(n){
 
 // ---------- 目標 ----------
 let addGoalType = 'habit';
+let EDITING_GOAL_ID = null;   // 編集中の目標（新規追加時はnull）
 function showAddGoal(type){
   addGoalType = type;
+  EDITING_GOAL_ID = null;
+  document.getElementById('goalSubmitBtn').textContent = '追加する';
   document.getElementById('addGoalTitle').textContent =
     type==='habit' ? '習慣目標を追加' : '成果目標を追加';
   document.getElementById('addGoalFor').textContent = `対象：${nameOf(TARGET_UID)}さん`;
@@ -824,26 +823,93 @@ function closeModal(id){ document.getElementById(id).classList.add('hidden'); }
 async function submitNewGoal(){
   const title = document.getElementById('newGoalTitle').value.trim();
   if(!title) return;
-  await db.collection('goals').add({
-    ownerUid: TARGET_UID,
-    type: addGoalType,
-    title: title.slice(0,60),
-    active: true,
-    enteredByUid: ME.uid,
-    createdAt: firebase.firestore.Timestamp.now()
-  });
+
+  if(EDITING_GOAL_ID){
+    // 既存の目標名を書き換える（記録はそのまま残る）
+    await db.collection('goals').doc(EDITING_GOAL_ID).update({
+      title: title.slice(0,60),
+      editedByUid: ME.uid,
+      editedAt: firebase.firestore.Timestamp.now()
+    });
+    EDITING_GOAL_ID = null;
+  } else {
+    await db.collection('goals').add({
+      ownerUid: TARGET_UID,
+      type: addGoalType,
+      title: title.slice(0,60),
+      active: true,
+      enteredByUid: ME.uid,
+      createdAt: firebase.firestore.Timestamp.now()
+    });
+  }
   closeModal('addGoalModal');
   await loadGoals();
   renderWeekNav();
   renderGoals();
 }
 
-async function deleteGoal(id){
-  if(!confirm('この目標を一覧から外しますか？（記録済みのペナルティは残ります）')) return;
+// 目標名の編集
+function editGoal(id){
+  const g = ALL_GOALS.find(x=>x.id===id);
+  if(!g) return;
+  EDITING_GOAL_ID = id;
+  document.getElementById('addGoalTitle').textContent = '目標を編集';
+  document.getElementById('addGoalFor').textContent =
+    `対象：${nameOf(g.ownerUid)}さん（${g.type==='habit'?'習慣目標':'成果目標'}）`;
+  document.getElementById('newGoalTitle').value = g.title;
+  document.getElementById('goalSubmitBtn').textContent = '保存する';
+  document.getElementById('addGoalModal').classList.remove('hidden');
+}
+
+// 一覧から外す（記録とペナルティは残る／あとで戻せる）
+async function hideGoal(id){
+  if(!confirm('この目標を一覧から外しますか？\n\n記録済みのペナルティはそのまま残ります。\n「一覧から外した目標」からいつでも戻せます。')) return;
   await db.collection('goals').doc(id).update({ active:false });
   await loadGoals();
   renderWeekNav();
   renderGoals();
+}
+
+// 完全に削除する（記録もペナルティも消える）
+async function destroyGoal(id){
+  const g = ALL_GOALS.find(x=>x.id===id);
+  if(!g) return;
+
+  // この目標に紐づく記録を数える
+  const [hSnap, oSnap] = await Promise.all([
+    db.collection('habitRecords').where('goalId','==',id).get(),
+    db.collection('outcomeRecords').where('goalId','==',id).get()
+  ]);
+  const failCount =
+    hSnap.docs.filter(d=>d.data().result==='fail').length * HABIT_PENALTY +
+    oSnap.docs.filter(d=>d.data().result==='fail').length * OUTCOME_PENALTY;
+  const recCount = hSnap.size + oSnap.size;
+
+  let msg = `「${g.title}」を完全に削除します。\n\n`;
+  if(recCount > 0){
+    msg += `この目標の記録 ${recCount}件 も一緒に削除されます。\n`;
+    if(failCount > 0){
+      msg += `そのうち失敗の記録により加算されていた ${jpy(failCount * POINT_PER_PENALTY)}P が減ります。\n`;
+    }
+  } else {
+    msg += `まだ記録はありません。\n`;
+  }
+  msg += `\nこの操作は取り消せません。よろしいですか？`;
+  if(!confirm(msg)) return;
+
+  // 記録 → 目標 の順に削除する
+  const batch = db.batch();
+  hSnap.forEach(d => batch.delete(d.ref));
+  oSnap.forEach(d => batch.delete(d.ref));
+  batch.delete(db.collection('goals').doc(id));
+  await batch.commit();
+
+  await loadGoals();
+  await loadOutcomeRecords();
+  await loadHabitRecords();
+  renderWeekNav();
+  renderGoals();
+  renderLedgerLogs();
 }
 
 function renderGoals(){
@@ -868,7 +934,11 @@ function renderGoals(){
         <button class="fail-btn ${r&&r.result==='fail'?'chosen-fail':''}" onclick="recordHabit('${g.id}','fail')">失敗</button>
       </div>
       ${by}
-      <button class="link-danger" onclick="deleteGoal('${g.id}')">この目標を外す</button>
+      <div class="goal-actions">
+        <button onclick="editGoal('${g.id}')">編集</button>
+        <button onclick="hideGoal('${g.id}')">一覧から外す</button>
+        <button class="danger" onclick="destroyGoal('${g.id}')">削除</button>
+      </div>
     </div>`;
   }).join('') : '<p class="muted">まだ習慣目標がありません</p>';
 
@@ -890,7 +960,11 @@ function renderGoals(){
         <button class="fail-btn ${r&&r.result==='fail'?'chosen-fail':''}" onclick="recordOutcome('${g.id}','fail')">失敗（+2）</button>
       </div>
       ${by}
-      <button class="link-danger" onclick="deleteGoal('${g.id}')">この目標を外す</button>
+      <div class="goal-actions">
+        <button onclick="editGoal('${g.id}')">編集</button>
+        <button onclick="hideGoal('${g.id}')">一覧から外す</button>
+        <button class="danger" onclick="destroyGoal('${g.id}')">削除</button>
+      </div>
     </div>`;
   }).join('') : '<p class="muted">まだ成果目標がありません</p>';
 
