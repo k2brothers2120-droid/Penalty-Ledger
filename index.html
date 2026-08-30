@@ -117,11 +117,18 @@
   .sub-label{font-size:11px; color:var(--text-dim); margin-top:8px;}
   .link-danger{background:none; border:none; color:var(--text-dim);
     font-size:11px; padding:6px 0 0; text-decoration:underline;}
-  .goal-actions{display:flex; gap:6px; margin-top:10px;
-    padding-top:9px; border-top:1px solid var(--line);}
-  .goal-actions button{flex:1; background:transparent; border:1px solid var(--line);
-    color:var(--text-dim); font-size:11px; padding:7px 4px;}
-  .goal-actions button.danger{border-color:var(--fail); color:var(--fail);}
+  .top-right{display:flex; align-items:center; gap:6px; flex-shrink:0;}
+  .more-btn{background:transparent; border:none; color:var(--text-dim);
+    font-size:17px; line-height:1; padding:4px 6px; border-radius:6px;}
+  .more-btn:hover{color:var(--amber); background:var(--panel2);}
+  .menu-list{display:flex; flex-direction:column; gap:8px;}
+  .menu-list button{width:100%; text-align:left; background:var(--panel2);
+    border:1px solid var(--line); color:var(--text); padding:12px 14px;
+    display:flex; flex-direction:column; gap:3px;}
+  .menu-list button.danger{border-color:var(--fail);}
+  .menu-list button.danger .mi-label{color:var(--fail);}
+  .mi-label{font-size:14px;}
+  .mi-desc{font-size:11px; color:var(--text-dim); line-height:1.5;}
 
   .log-row{display:flex; justify-content:space-between; align-items:center;
     padding:9px 0; border-bottom:1px solid var(--line); font-size:13px; gap:8px;}
@@ -322,6 +329,30 @@
     <div class="btn-row">
       <button class="btn-ghost" onclick="closeModal('addGoalModal')">キャンセル</button>
       <button class="btn-main" id="goalSubmitBtn" onclick="submitNewGoal()">追加する</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg hidden" id="goalMenuModal">
+  <div class="modal">
+    <h3 class="serif" style="margin:0 0 4px;" id="goalMenuTitle"></h3>
+    <p class="muted" id="goalMenuSub" style="margin:0 0 16px;"></p>
+    <div class="menu-list">
+      <button onclick="menuAction('edit')">
+        <span class="mi-label">編集</span>
+        <span class="mi-desc">目標の内容を書き換えます。記録はそのまま残ります</span>
+      </button>
+      <button onclick="menuAction('hide')">
+        <span class="mi-label">一覧から外す</span>
+        <span class="mi-desc">記録とペナルティは残ります。あとで戻せます</span>
+      </button>
+      <button class="danger" onclick="menuAction('destroy')">
+        <span class="mi-label">削除</span>
+        <span class="mi-desc">目標も記録も消えます。ペナルティも取り消されます</span>
+      </button>
+    </div>
+    <div class="btn-row">
+      <button class="btn-ghost" onclick="closeModal('goalMenuModal')">閉じる</button>
     </div>
   </div>
 </div>
@@ -848,6 +879,27 @@ async function submitNewGoal(){
   renderGoals();
 }
 
+// 目標カードの「⋯」から開く設定メニュー
+let MENU_GOAL_ID = null;
+function openGoalMenu(id){
+  const g = ALL_GOALS.find(x=>x.id===id);
+  if(!g) return;
+  MENU_GOAL_ID = id;
+  document.getElementById('goalMenuTitle').textContent = g.title;
+  document.getElementById('goalMenuSub').textContent =
+    `${nameOf(g.ownerUid)}さんの${g.type==='habit'?'習慣目標':'成果目標'}`;
+  document.getElementById('goalMenuModal').classList.remove('hidden');
+}
+
+function menuAction(kind){
+  const id = MENU_GOAL_ID;
+  closeModal('goalMenuModal');
+  if(!id) return;
+  if(kind === 'edit')         editGoal(id);
+  else if(kind === 'hide')    hideGoal(id);
+  else if(kind === 'destroy') destroyGoal(id);
+}
+
 // 目標名の編集
 function editGoal(id){
   const g = ALL_GOALS.find(x=>x.id===id);
@@ -927,18 +979,18 @@ function renderGoals(){
       : (r.result==='success' ? '<span class="tag done">達成</span>'
                               : '<span class="tag outcome">失敗 +1</span>');
     return `<div class="goal-item">
-      <div class="top"><span>${esc(g.title)}</span>${state}</div>
+      <div class="top">
+        <span>${esc(g.title)}</span>
+        <span class="top-right">${state}
+          <button class="more-btn" onclick="openGoalMenu('${g.id}')" aria-label="この目標の設定">⋯</button>
+        </span>
+      </div>
       <div class="sub-label">${weekRangeLabel(SELECTED_WEEK)} の週${weekSuffix()}</div>
       <div class="status-buttons">
         <button class="ok-btn ${r&&r.result==='success'?'chosen-ok':''}" onclick="recordHabit('${g.id}','success')">達成</button>
         <button class="fail-btn ${r&&r.result==='fail'?'chosen-fail':''}" onclick="recordHabit('${g.id}','fail')">失敗</button>
       </div>
       ${by}
-      <div class="goal-actions">
-        <button onclick="editGoal('${g.id}')">編集</button>
-        <button onclick="hideGoal('${g.id}')">一覧から外す</button>
-        <button class="danger" onclick="destroyGoal('${g.id}')">削除</button>
-      </div>
     </div>`;
   }).join('') : '<p class="muted">まだ習慣目標がありません</p>';
 
@@ -953,18 +1005,18 @@ function renderGoals(){
       ? '記録済みです。間違えた場合は押し直すと訂正できます。'
       : '結果が出たら記録してください。';
     return `<div class="goal-item">
-      <div class="top"><span>${esc(g.title)}</span>${state}</div>
+      <div class="top">
+        <span>${esc(g.title)}</span>
+        <span class="top-right">${state}
+          <button class="more-btn" onclick="openGoalMenu('${g.id}')" aria-label="この目標の設定">⋯</button>
+        </span>
+      </div>
       <div class="sub-label">${hint}</div>
       <div class="status-buttons">
         <button class="ok-btn ${r&&r.result==='success'?'chosen-ok':''}" onclick="recordOutcome('${g.id}','success')">達成</button>
         <button class="fail-btn ${r&&r.result==='fail'?'chosen-fail':''}" onclick="recordOutcome('${g.id}','fail')">失敗（+2）</button>
       </div>
       ${by}
-      <div class="goal-actions">
-        <button onclick="editGoal('${g.id}')">編集</button>
-        <button onclick="hideGoal('${g.id}')">一覧から外す</button>
-        <button class="danger" onclick="destroyGoal('${g.id}')">削除</button>
-      </div>
     </div>`;
   }).join('') : '<p class="muted">まだ成果目標がありません</p>';
 
