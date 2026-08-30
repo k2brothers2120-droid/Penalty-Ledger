@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f0e0c">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<title>Penalty Ledger</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<style>
+  :root{
+    --bg:#0f0e0c; --panel:#181510; --panel2:#1f1a13;
+    --line:#332c20; --amber:#d4a843; --amber-dim:#8a7139;
+    --text:#eee6d6; --text-dim:#a89a7d; --fail:#c65b4e; --ok:#5f9e72;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; padding:0; background:var(--bg); color:var(--text);
+    font-family:'DM Mono',monospace; min-height:100vh;
+    padding-top:env(safe-area-inset-top);}
+  h1,h2,h3,.serif{font-family:'Cormorant Garamond',serif;}
+  #app{max-width:520px; margin:0 auto; padding:20px 16px 110px;}
+  .hidden{display:none !important;}
+
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:16px; margin-bottom:14px;}
+  .muted{color:var(--text-dim); font-size:13px; line-height:1.6;}
+  .title{font-family:'Cormorant Garamond',serif; font-size:27px; font-weight:600;
+    color:var(--amber); letter-spacing:.02em; margin:4px 0 18px;}
+  label{display:block; font-size:12px; color:var(--text-dim); margin:12px 0 5px;}
+  input{width:100%; background:var(--panel2); border:1px solid var(--line);
+    color:var(--text); border-radius:8px; padding:11px 12px;
+    font-family:'DM Mono',monospace; font-size:16px;}
+  input:focus{outline:2px solid var(--amber-dim); outline-offset:1px;}
+  button{cursor:pointer; border:none; border-radius:10px; padding:12px 16px;
+    font-family:'DM Mono',monospace; font-size:14px; font-weight:500;}
+  button:focus-visible{outline:2px solid var(--amber); outline-offset:2px;}
+  .btn-main{background:var(--amber); color:#1a1508; width:100%;}
+  .btn-ghost{background:transparent; border:1px solid var(--amber-dim); color:var(--amber);}
+  .btn-danger{background:transparent; border:1px solid var(--fail); color:var(--fail);}
+  .btn-row{display:flex; gap:8px; margin-top:12px;}
+  .btn-row button{flex:1;}
+  .name-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:14px 0 4px;}
+  .name-btn{background:var(--panel2); border:1px solid var(--line); color:var(--text);
+    padding:16px 8px; border-radius:10px; font-size:15px;}
+  .name-btn.active{border-color:var(--amber); color:var(--amber);}
+
+  /* 対象メンバー切替 */
+  .target-bar{display:flex; gap:6px; overflow-x:auto; padding-bottom:4px; margin-bottom:4px;}
+  .target-bar button{flex:1 0 auto; background:var(--panel2); border:1px solid var(--line);
+    color:var(--text-dim); font-size:13px; padding:10px 12px; white-space:nowrap;}
+  .target-bar button.active{border-color:var(--amber); color:var(--amber); background:var(--panel);}
+  .proxy-note{background:var(--panel2); border-left:2px solid var(--amber);
+    padding:8px 10px; border-radius:0 6px 6px 0; font-size:12px;
+    color:var(--text-dim); margin-bottom:12px;}
+
+  .row{display:flex; justify-content:space-between; align-items:center;
+    padding:12px 0; border-bottom:1px solid var(--line); gap:10px;}
+  .row:last-child{border-bottom:none;}
+  .member-name{font-family:'Cormorant Garamond',serif; font-size:19px;}
+  .penalty-num{font-size:21px; color:var(--amber); font-weight:500;}
+  .penalty-num.zero{color:var(--text-dim);}
+  .pt-cell{text-align:right;}
+  .pt-sub{font-size:11px; color:var(--text-dim); margin-top:2px;}
+
+  .goal-item{border:1px solid var(--line); border-radius:10px; padding:11px 12px; margin-bottom:9px;}
+  .goal-item .top{display:flex; justify-content:space-between; align-items:center; gap:8px;}
+  .tag{font-size:10px; padding:2px 7px; border-radius:20px; white-space:nowrap;
+    border:1px solid var(--amber-dim); color:var(--amber-dim);}
+  .tag.outcome{border-color:var(--fail); color:var(--fail);}
+  .tag.proxy{border-color:var(--text-dim); color:var(--text-dim);}
+  .status-buttons{display:flex; gap:6px; margin-top:9px;}
+  .status-buttons button{flex:1; font-size:12px; padding:9px 4px;}
+  .ok-btn{background:transparent; border:1px solid var(--ok); color:var(--ok);}
+  .fail-btn{background:transparent; border:1px solid var(--fail); color:var(--fail);}
+  .chosen-ok{background:var(--ok); color:#0f0e0c;}
+  .chosen-fail{background:var(--fail); color:#0f0e0c;}
+  .week-label{font-size:11px; color:var(--text-dim); margin-top:8px;}
+  .link-danger{background:none; border:none; color:var(--text-dim);
+    font-size:11px; padding:6px 0 0; text-decoration:underline;}
+
+  .redeem-row{display:flex; justify-content:space-between; align-items:center;
+    padding:9px 0; border-bottom:1px solid var(--line); font-size:13px; gap:8px;}
+  .redeem-row:last-child{border-bottom:none;}
+  .redeem-pt{color:var(--ok); white-space:nowrap;}
+  .quick{display:flex; gap:6px; margin-top:8px;}
+  .quick button{flex:1; background:var(--panel2); border:1px solid var(--line);
+    color:var(--text-dim); font-size:12px; padding:8px 4px;}
+
+  nav.bottom{position:fixed; bottom:0; left:0; right:0; background:var(--panel);
+    border-top:1px solid var(--line); display:flex;
+    padding-bottom:env(safe-area-inset-bottom);}
+  nav.bottom button{flex:1; background:transparent; color:var(--text-dim);
+    border-radius:0; padding:14px 0 10px; font-size:11px;}
+  nav.bottom button.active{color:var(--amber);}
+
+  .banner{position:fixed; top:0; left:0; right:0; background:var(--amber); color:#1a1508;
+    text-align:center; padding:10px; font-size:13px; z-index:50; cursor:pointer;
+    padding-top:calc(10px + env(safe-area-inset-top));}
+  .modal-bg{position:fixed; inset:0; background:rgba(0,0,0,.7); display:flex;
+    align-items:center; justify-content:center; z-index:60; padding:20px;}
+  .modal{background:var(--panel); border:1px solid var(--amber-dim);
+    border-radius:14px; padding:20px; width:100%; max-width:400px;}
+  .settle-row{display:flex; justify-content:space-between; padding:7px 0; font-size:14px;}
+  .err{color:var(--fail); font-size:13px; min-height:18px; margin:10px 0 0;}
+</style>
+</head>
+<body>
+
+<div id="updateBanner" class="banner hidden">新しいバージョンがあります。タップして更新</div>
+
+<div id="app">
+
+  <!-- ===== ログイン ===== -->
+  <section id="loginView" class="hidden">
+    <h1 class="title">Penalty Ledger</h1>
+    <div class="card">
+      <p class="muted">自分の名前を選び、パスワードを入力してください。</p>
+      <div class="name-grid" id="loginNames"></div>
+      <label>パスワード</label>
+      <input type="password" id="pwInput" autocomplete="current-password" placeholder="••••••••">
+      <div class="btn-row"><button class="btn-main" onclick="doLogin()">ログイン</button></div>
+      <p id="loginError" class="err"></p>
+    </div>
+    <p class="muted">このアプリはペナルティの記録のみを扱います。写真・日記などは保存しません。</p>
+  </section>
+
+  <!-- ===== ダッシュボード ===== -->
+  <section id="dashView" class="hidden">
+    <h1 class="title">今期のペナルティ</h1>
+    <div class="card" id="dashList"><p class="muted">読み込み中…</p></div>
+    <p class="muted" id="periodInfo"></p>
+    <button class="btn-ghost" style="width:100%" onclick="openSettleModal()">この期間を精算してリセット</button>
+  </section>
+
+  <!-- ===== 記録（誰の分でも入力可） ===== -->
+  <section id="recordView" class="hidden">
+    <h1 class="title">記録する</h1>
+
+    <div class="card">
+      <p class="muted" style="margin:0 0 8px;">誰の記録を入力しますか？</p>
+      <div class="target-bar" id="targetBar"></div>
+    </div>
+
+    <div id="proxyNote" class="proxy-note hidden"></div>
+
+    <div class="card">
+      <h3 class="serif" style="margin:0 0 4px;color:var(--amber-dim);font-size:16px;">習慣目標</h3>
+      <p class="muted" style="margin:0 0 12px;">週ごとに判定。未達成で1ペナルティ。</p>
+      <div id="habitGoalList"></div>
+      <div class="btn-row"><button class="btn-ghost" onclick="showAddGoal('habit')">＋ 習慣目標を追加</button></div>
+    </div>
+
+    <div class="card">
+      <h3 class="serif" style="margin:0 0 4px;color:var(--fail);font-size:16px;">成果目標</h3>
+      <p class="muted" style="margin:0 0 12px;">結果が出た時点で判定。未達成で2ペナルティ。</p>
+      <div id="outcomeGoalList"></div>
+      <div class="btn-row"><button class="btn-ghost" onclick="showAddGoal('outcome')">＋ 成果目標を追加</button></div>
+    </div>
+
+    <div class="card">
+      <h3 class="serif" style="margin:0 0 4px;color:var(--ok);font-size:16px;">ペナルティ消化</h3>
+      <p class="muted" style="margin:0 0 4px;">
+        取り決めたアクションを実行したら、消化分を入力してください。総ポイントから差し引かれます。
+      </p>
+      <p class="muted" id="myPointSummary" style="margin:0 0 4px;"></p>
+      <label>消化ポイント</label>
+      <input type="number" id="redeemPoints" inputmode="numeric" step="1000" min="1" placeholder="例：5000">
+      <div class="quick">
+        <button onclick="setRedeem(5000)">5,000</button>
+        <button onclick="setRedeem(10000)">10,000</button>
+        <button onclick="setRedeem(15000)">15,000</button>
+      </div>
+      <label>内容（何をして消化したか）</label>
+      <input id="redeemNote" maxlength="40" placeholder="例：幹事を担当">
+      <p id="redeemError" class="err"></p>
+      <div class="btn-row"><button class="btn-main" onclick="submitRedeem()">消化を反映する</button></div>
+      <h3 class="serif" style="margin:20px 0 4px;font-size:15px;color:var(--text-dim);">今期の消化履歴</h3>
+      <div id="redeemList"></div>
+    </div>
+
+    <p class="muted">記録内容はメンバー全員に表示されます。知られたくない内容は、自分だけが分かる表記にしてください。</p>
+  </section>
+
+  <!-- ===== みんなの状況 ===== -->
+  <section id="allView" class="hidden">
+    <h1 class="title">みんなの状況</h1>
+    <div id="allList"></div>
+  </section>
+
+  <!-- ===== 履歴 ===== -->
+  <section id="historyView" class="hidden">
+    <h1 class="title">精算履歴</h1>
+    <div id="historyList"></div>
+  </section>
+
+</div>
+
+<nav class="bottom hidden" id="bottomNav">
+  <button data-tab="dashView" onclick="switchTab('dashView')">ホーム</button>
+  <button data-tab="recordView" onclick="switchTab('recordView')">記録</button>
+  <button data-tab="allView" onclick="switchTab('allView')">みんな</button>
+  <button data-tab="historyView" onclick="switchTab('historyView')">履歴</button>
+  <button onclick="logout()">ログアウト</button>
+</nav>
+
+<div class="modal-bg hidden" id="addGoalModal">
+  <div class="modal">
+    <h3 class="serif" id="addGoalTitle" style="margin-top:0;"></h3>
+    <p class="muted" id="addGoalFor"></p>
+    <label>目標の内容</label>
+    <input id="newGoalTitle" placeholder="例：朝活週2回 / TOEIC800点">
+    <div class="btn-row">
+      <button class="btn-ghost" onclick="closeModal('addGoalModal')">キャンセル</button>
+      <button class="btn-main" onclick="submitNewGoal()">追加する</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg hidden" id="settleModal">
+  <div class="modal">
+    <h3 class="serif" style="margin-top:0;">この内容で精算しますか？</h3>
+    <div id="settlePreview"></div>
+    <p class="muted">精算すると全員のポイントが0にリセットされ、この結果が履歴に残ります。取り消せません。</p>
+    <div class="btn-row">
+      <button class="btn-ghost" onclick="closeModal('settleModal')">キャンセル</button>
+      <button class="btn-danger" onclick="confirmSettle()">精算を確定</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   【設定1】Firebaseの接続情報
+   Firebaseコンソール → プロジェクトの設定 → マイアプリ からコピー
+   ※このapiKeyは秘密情報ではありません（公開されても問題ない値です）。
+     安全性はセキュリティルールとログインで担保します。
+============================================================ */
+const firebaseConfig = {
+  apiKey: "AIzaSyCyUHcUB_3detB3AuK_1zy4Fk4SLVssa2I",
+  authDomain: "penalty-ledger.firebaseapp.com",
+  projectId: "penalty-ledger",
+  storageBucket: "penalty-ledger.firebasestorage.app",
+  messagingSenderId: "343069486446",
+  appId: "1:343069486446:web:3d49e3d4ad41d59bff257f"
+};
+
+/* ============================================================
+   【設定2】メンバー4人（表示名とログイン用メールアドレス）
+   メールアドレスはFirebaseコンソールで手動作成したものを書きます。
+   実在しないアドレスで構いません（形式が正しければOK）。
+   ※パスワードはここには書きません。各自が入力します。
+============================================================ */
+const ACCOUNTS = [
+  { name: "山本 一輝", email: "user1@self-improvement.com" },
+  { name: "田邊 寛基", email: "user2@self-improvement.com" },
+  { name: "岡本 幸大", email: "user3@self-improvement.com" },
+  { name: "岸田 凌",   email: "user4@self-improvement.com" }
+];
+
+const POINT_PER_PENALTY = 5000; // 1ペナルティ = 5,000P
+/* ========================================================== */
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+
+let ME = null;          // ログイン中の自分 {uid, name, email}
+let TARGET_UID = null;  // いま記録の対象にしているメンバー
+let MEMBERS = {};       // uid -> 表示名
+let ALL_GOALS = [];
+let PERIOD_START = null;
+
+const PERIOD_REF = db.collection('settings').doc('period');
+
+// ---------- 起動 ----------
+registerSW();
+renderLoginNames();
+
+auth.onAuthStateChanged(async user => {
+  if (user) {
+    const acc = ACCOUNTS.find(a => a.email === user.email);
+    ME = { uid: user.uid, email: user.email, name: acc ? acc.name : user.email };
+    TARGET_UID = ME.uid;
+    await ensureMemberDoc();
+    await enterApp();
+  } else {
+    ME = null;
+    show('loginView');
+  }
+});
+
+function show(id){
+  ['loginView','dashView','recordView','allView','historyView'].forEach(v=>{
+    document.getElementById(v).classList.toggle('hidden', v !== id);
+  });
+  document.getElementById('bottomNav').classList.toggle('hidden', id === 'loginView');
+}
+
+// ---------- ログイン ----------
+let selectedEmail = null;
+function renderLoginNames(){
+  const wrap = document.getElementById('loginNames');
+  wrap.innerHTML = '';
+  ACCOUNTS.forEach(a=>{
+    const b = document.createElement('button');
+    b.className = 'name-btn';
+    b.textContent = a.name;
+    b.onclick = ()=>{
+      selectedEmail = a.email;
+      [...wrap.children].forEach(c=>c.classList.remove('active'));
+      b.classList.add('active');
+    };
+    wrap.appendChild(b);
+  });
+}
+
+async function doLogin(){
+  const err = document.getElementById('loginError');
+  const pw = document.getElementById('pwInput').value;
+  if(!selectedEmail){ err.textContent = '名前を選んでください'; return; }
+  if(!pw){ err.textContent = 'パスワードを入力してください'; return; }
+  err.textContent = 'ログイン中…';
+  try {
+    await auth.signInWithEmailAndPassword(selectedEmail, pw);
+    document.getElementById('pwInput').value = '';
+    err.textContent = '';
+  } catch(e) {
+    err.textContent = 'ログインできません。名前とパスワードを確認してください。';
+  }
+}
+
+function logout(){ auth.signOut(); }
+
+async function ensureMemberDoc(){
+  try {
+    await db.collection('members').doc(ME.uid).set({ name: ME.name }, { merge:true });
+  } catch(e) { console.warn('member doc', e); }
+}
+
+// ---------- 画面切替 ----------
+function switchTab(id){
+  show(id);
+  [...document.querySelectorAll('#bottomNav button')].forEach(b=>{
+    b.classList.toggle('active', b.dataset.tab === id);
+  });
+  if(id==='dashView') renderDashboard();
+  if(id==='recordView') renderRecordView();
+  if(id==='allView') renderAll();
+  if(id==='historyView') renderHistory();
+}
+
+async function enterApp(){
+  await loadPeriod();
+  await loadMembers();
+  await loadGoals();
+  switchTab('dashView');
+}
+
+async function loadPeriod(){
+  const snap = await PERIOD_REF.get();
+  if(snap.exists){
+    PERIOD_START = snap.data().startAt.toDate();
+  } else {
+    const now = firebase.firestore.Timestamp.now();
+    await PERIOD_REF.set({ startAt: now });
+    PERIOD_START = now.toDate();
+  }
+}
+
+async function loadMembers(){
+  const snap = await db.collection('members').get();
+  MEMBERS = {};
+  snap.forEach(d => MEMBERS[d.id] = d.data().name);
+}
+
+async function loadGoals(){
+  const snap = await db.collection('goals').where('active','==',true).get();
+  ALL_GOALS = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+}
+
+function nameOf(uid){ return MEMBERS[uid] || '?'; }
+function isProxy(){ return TARGET_UID !== ME.uid; }
+
+function getWeekStart(d = new Date()){
+  const date = new Date(d);
+  const day = (date.getDay() + 6) % 7; // 月曜=0
+  date.setDate(date.getDate() - day);
+  date.setHours(0,0,0,0);
+  const p = n => String(n).padStart(2,'0');
+  return `${date.getFullYear()}-${p(date.getMonth()+1)}-${p(date.getDate())}`;
+}
+function fmt(d){ return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`; }
+function jpy(n){ return Number(n).toLocaleString('ja-JP'); }
+function esc(s){
+  return String(s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ---------- 集計 ----------
+async function computeTotals(){
+  const ts = firebase.firestore.Timestamp.fromDate(PERIOD_START);
+  const counts = {}, redeemed = {};
+  Object.keys(MEMBERS).forEach(uid=>{ counts[uid]=0; redeemed[uid]=0; });
+
+  const hSnap = await db.collection('habitRecords').where('createdAt','>=',ts).get();
+  hSnap.forEach(d=>{ const r=d.data();
+    if(r.result==='fail') counts[r.ownerUid] = (counts[r.ownerUid]||0) + 1; });
+
+  const oSnap = await db.collection('outcomeRecords').where('createdAt','>=',ts).get();
+  oSnap.forEach(d=>{ const r=d.data();
+    if(r.result==='fail') counts[r.ownerUid] = (counts[r.ownerUid]||0) + 2; });
+
+  const rSnap = await db.collection('redemptions').where('createdAt','>=',ts).get();
+  rSnap.forEach(d=>{ const r=d.data();
+    redeemed[r.ownerUid] = (redeemed[r.ownerUid]||0) + (r.points||0); });
+
+  const totals = {};
+  Object.keys(counts).forEach(uid=>{
+    const earned = counts[uid] * POINT_PER_PENALTY;
+    totals[uid] = {
+      count: counts[uid],
+      earned,
+      redeemed: redeemed[uid] || 0,
+      balance: Math.max(0, earned - (redeemed[uid] || 0))
+    };
+  });
+  return totals;
+}
+
+async function renderDashboard(){
+  await loadMembers();
+  const totals = await computeTotals();
+  const list = document.getElementById('dashList');
+  const entries = Object.entries(totals).sort((a,b)=>b[1].balance - a[1].balance);
+  list.innerHTML = entries.length ? entries.map(([uid,t])=>`
+    <div class="row">
+      <span class="member-name">${esc(nameOf(uid))}${uid===ME.uid?' (自分)':''}</span>
+      <span class="pt-cell">
+        <div class="penalty-num ${t.balance===0?'zero':''}">${jpy(t.balance)} P</div>
+        <div class="pt-sub">${t.count}ペナルティ${t.redeemed>0?` ／ 消化 ${jpy(t.redeemed)}P`:''}</div>
+      </span>
+    </div>`).join('') : '<p class="muted">まだメンバーの記録がありません</p>';
+  document.getElementById('periodInfo').textContent =
+    `集計期間：${fmt(PERIOD_START)} 〜 現在（1ペナルティ = ${jpy(POINT_PER_PENALTY)}P）`;
+}
+
+// ---------- 記録画面 ----------
+async function renderRecordView(){
+  await loadMembers();
+  await loadGoals();
+  renderTargetBar();
+  renderGoals();
+  renderRedemptions();
+}
+
+function renderTargetBar(){
+  const bar = document.getElementById('targetBar');
+  // 自分を先頭に、その後は登録順
+  const uids = Object.keys(MEMBERS).sort((a,b)=> (a===ME.uid?-1:b===ME.uid?1:0));
+  bar.innerHTML = '';
+  uids.forEach(uid=>{
+    const b = document.createElement('button');
+    b.textContent = uid===ME.uid ? `${nameOf(uid)}（自分）` : nameOf(uid);
+    b.className = uid===TARGET_UID ? 'active' : '';
+    b.onclick = ()=>{ TARGET_UID = uid; renderRecordView(); };
+    bar.appendChild(b);
+  });
+
+  const note = document.getElementById('proxyNote');
+  if(isProxy()){
+    note.classList.remove('hidden');
+    note.textContent = `${nameOf(TARGET_UID)}さんの記録を代理で入力しています。入力内容には「${ME.name}が入力」と記録されます。`;
+  } else {
+    note.classList.add('hidden');
+  }
+}
+
+// ---------- 目標 ----------
+let addGoalType = 'habit';
+function showAddGoal(type){
+  addGoalType = type;
+  document.getElementById('addGoalTitle').textContent =
+    type==='habit' ? '習慣目標を追加' : '成果目標を追加';
+  document.getElementById('addGoalFor').textContent = `対象：${nameOf(TARGET_UID)}さん`;
+  document.getElementById('newGoalTitle').value = '';
+  document.getElementById('addGoalModal').classList.remove('hidden');
+}
+function closeModal(id){ document.getElementById(id).classList.add('hidden'); }
+
+async function submitNewGoal(){
+  const title = document.getElementById('newGoalTitle').value.trim();
+  if(!title) return;
+  await db.collection('goals').add({
+    ownerUid: TARGET_UID,
+    type: addGoalType,
+    title: title.slice(0,60),
+    active: true,
+    enteredByUid: ME.uid,
+    createdAt: firebase.firestore.Timestamp.now()
+  });
+  closeModal('addGoalModal');
+  await loadGoals();
+  renderGoals();
+}
+
+async function deleteGoal(id){
+  if(!confirm('この目標を一覧から外しますか？（記録済みのペナルティは残ります）')) return;
+  await db.collection('goals').doc(id).update({ active:false });
+  await loadGoals();
+  renderGoals();
+}
+
+async function renderGoals(){
+  const hWrap = document.getElementById('habitGoalList');
+  const oWrap = document.getElementById('outcomeGoalList');
+  const weekStart = getWeekStart();
+  const goals = ALL_GOALS.filter(g=>g.ownerUid === TARGET_UID);
+  const habits = goals.filter(g=>g.type==='habit');
+  const outcomes = goals.filter(g=>g.type==='outcome');
+
+  const recSnap = await db.collection('habitRecords')
+    .where('ownerUid','==',TARGET_UID).where('weekStart','==',weekStart).get();
+  const recs = {};
+  recSnap.forEach(d=>{ const r = d.data(); recs[r.goalId] = r; });
+
+  hWrap.innerHTML = habits.length ? habits.map(g=>{
+    const r = recs[g.id];
+    const by = (r && r.enteredByUid && r.enteredByUid !== g.ownerUid)
+      ? `<div class="week-label">${esc(nameOf(r.enteredByUid))}が入力</div>` : '';
+    return `<div class="goal-item">
+      <div class="top"><span>${esc(g.title)}</span><span class="tag">習慣</span></div>
+      <div class="week-label">今週（${weekStart}〜）の判定</div>
+      <div class="status-buttons">
+        <button class="ok-btn ${r&&r.result==='success'?'chosen-ok':''}" onclick="recordHabit('${g.id}','success')">達成</button>
+        <button class="fail-btn ${r&&r.result==='fail'?'chosen-fail':''}" onclick="recordHabit('${g.id}','fail')">未達成</button>
+      </div>
+      ${by}
+      <button class="link-danger" onclick="deleteGoal('${g.id}')">この目標を外す</button>
+    </div>`;
+  }).join('') : '<p class="muted">まだ習慣目標がありません</p>';
+
+  oWrap.innerHTML = outcomes.length ? outcomes.map(g=>`
+    <div class="goal-item">
+      <div class="top"><span>${esc(g.title)}</span><span class="tag outcome">成果</span></div>
+      <div class="week-label">結果が出たら記録してください（1回のみ）</div>
+      <div class="status-buttons">
+        <button class="ok-btn" onclick="recordOutcome('${g.id}','success')">達成した</button>
+        <button class="fail-btn" onclick="recordOutcome('${g.id}','fail')">未達成だった</button>
+      </div>
+      <button class="link-danger" onclick="deleteGoal('${g.id}')">この目標を外す</button>
+    </div>`).join('') : '<p class="muted">まだ成果目標がありません</p>';
+}
+
+async function recordHabit(goalId, result){
+  const weekStart = getWeekStart();
+  const docId = `${TARGET_UID}_${goalId}_${weekStart}`; // 週×目標で1件に固定
+  await db.collection('habitRecords').doc(docId).set({
+    goalId,
+    ownerUid: TARGET_UID,
+    enteredByUid: ME.uid,
+    weekStart,
+    result,
+    createdAt: firebase.firestore.Timestamp.now()
+  });
+  renderGoals();
+}
+
+async function recordOutcome(goalId, result){
+  const who = isProxy() ? `${nameOf(TARGET_UID)}さんの記録として` : '';
+  const msg = result==='success'
+    ? `${who}「達成」を記録します。よろしいですか？`
+    : `${who}「未達成」を記録します。2ペナルティ（${jpy(2*POINT_PER_PENALTY)}P）が加算されます。よろしいですか？`;
+  if(!confirm(msg)) return;
+  await db.collection('outcomeRecords').add({
+    goalId,
+    ownerUid: TARGET_UID,
+    enteredByUid: ME.uid,
+    result,
+    createdAt: firebase.firestore.Timestamp.now()
+  });
+  await db.collection('goals').doc(goalId).update({ active:false });
+  await loadGoals();
+  renderGoals();
+}
+
+// ---------- ペナルティ消化 ----------
+function setRedeem(v){ document.getElementById('redeemPoints').value = v; }
+
+async function submitRedeem(){
+  const err = document.getElementById('redeemError');
+  const pts = parseInt(document.getElementById('redeemPoints').value, 10);
+  const note = document.getElementById('redeemNote').value.trim();
+  if(!pts || pts <= 0){ err.textContent = '消化ポイントを入力してください'; return; }
+  if(!note){ err.textContent = '消化した内容を入力してください'; return; }
+
+  const totals = await computeTotals();
+  const t = totals[TARGET_UID];
+  if(t && pts > t.balance){
+    err.textContent = `残高（${jpy(t.balance)}P）を超える消化はできません`;
+    return;
+  }
+  const who = isProxy() ? `${nameOf(TARGET_UID)}さんの` : '';
+  if(!confirm(`${who}消化として ${jpy(pts)}P を記録します。よろしいですか？`)) return;
+
+  err.textContent = '';
+  await db.collection('redemptions').add({
+    ownerUid: TARGET_UID,
+    enteredByUid: ME.uid,
+    points: pts,
+    note: note.slice(0,40),
+    createdAt: firebase.firestore.Timestamp.now()
+  });
+  document.getElementById('redeemPoints').value = '';
+  document.getElementById('redeemNote').value = '';
+  renderRedemptions();
+}
+
+async function deleteRedemption(id){
+  if(!confirm('この消化記録を取り消しますか？')) return;
+  await db.collection('redemptions').doc(id).delete();
+  renderRedemptions();
+}
+
+async function renderRedemptions(){
+  const totals = await computeTotals();
+  const t = totals[TARGET_UID];
+  const label = isProxy() ? `${nameOf(TARGET_UID)}さんの残高` : '現在の残高';
+  document.getElementById('myPointSummary').innerHTML = t
+    ? `${label}：<span style="color:var(--amber)">${jpy(t.balance)} P</span>（発生 ${jpy(t.earned)}P − 消化 ${jpy(t.redeemed)}P）`
+    : '';
+
+  const ts = firebase.firestore.Timestamp.fromDate(PERIOD_START);
+  const snap = await db.collection('redemptions')
+    .where('ownerUid','==',TARGET_UID).where('createdAt','>=',ts).get();
+  const wrap = document.getElementById('redeemList');
+  if(snap.empty){ wrap.innerHTML = '<p class="muted">今期の消化はまだありません</p>'; return; }
+  const rows = snap.docs.map(d=>({ id:d.id, ...d.data() }))
+    .sort((a,b)=> b.createdAt.toMillis() - a.createdAt.toMillis());
+  wrap.innerHTML = rows.map(r=>{
+    const by = (r.enteredByUid && r.enteredByUid !== r.ownerUid)
+      ? ` <span class="tag proxy">${esc(nameOf(r.enteredByUid))}が入力</span>` : '';
+    return `<div class="redeem-row">
+      <span>${fmt(r.createdAt.toDate())}　${esc(r.note)}${by}</span>
+      <span class="redeem-pt">−${jpy(r.points)}P</span>
+      <button class="link-danger" style="padding:0" onclick="deleteRedemption('${r.id}')">取消</button>
+    </div>`;
+  }).join('');
+}
+
+// ---------- みんなの状況 ----------
+async function renderAll(){
+  await loadMembers();
+  await loadGoals();
+  const wrap = document.getElementById('allList');
+  const weekStart = getWeekStart();
+  const hSnap = await db.collection('habitRecords').where('weekStart','==',weekStart).get();
+  const recByGoal = {};
+  hSnap.forEach(d=>{ recByGoal[d.data().goalId] = d.data().result; });
+
+  wrap.innerHTML = Object.keys(MEMBERS).map(uid=>{
+    const goals = ALL_GOALS.filter(g=>g.ownerUid===uid);
+    const rows = goals.length ? goals.map(g=>{
+      let st = '<span class="muted">未記録</span>';
+      if(g.type==='habit'){
+        const r = recByGoal[g.id];
+        if(r==='success') st = '<span style="color:var(--ok)">達成</span>';
+        else if(r==='fail') st = '<span style="color:var(--fail)">未達成</span>';
+      } else { st = '<span class="muted">結果待ち</span>'; }
+      return `<div class="row"><span style="font-size:13px">${esc(g.title)}
+        <span class="tag ${g.type==='outcome'?'outcome':''}">${g.type==='habit'?'習慣':'成果'}</span></span>
+        <span style="font-size:13px">${st}</span></div>`;
+    }).join('') : '<p class="muted">目標が未設定です</p>';
+    return `<div class="card">
+      <h3 class="serif" style="margin:0 0 6px;font-size:19px;">${esc(nameOf(uid))}</h3>
+      <p class="muted" style="margin:0 0 6px;">今週（${weekStart}〜）</p>${rows}</div>`;
+  }).join('');
+}
+
+// ---------- 精算 ----------
+async function openSettleModal(){
+  const totals = await computeTotals();
+  document.getElementById('settlePreview').innerHTML =
+    Object.entries(totals).map(([uid,t])=>
+      `<div class="settle-row"><span>${esc(nameOf(uid))}</span>
+        <span>${jpy(t.balance)} P</span></div>`).join('');
+  document.getElementById('settleModal').classList.remove('hidden');
+}
+
+async function confirmSettle(){
+  const totals = await computeTotals();
+  const readable = {};
+  Object.entries(totals).forEach(([uid,t])=>{
+    readable[nameOf(uid)] = {
+      count: t.count, earned: t.earned, redeemed: t.redeemed, balance: t.balance
+    };
+  });
+  const now = firebase.firestore.Timestamp.now();
+  await db.collection('settlements').add({
+    periodStart: firebase.firestore.Timestamp.fromDate(PERIOD_START),
+    periodEnd: now,
+    totals: readable,
+    settledByUid: ME.uid,
+    createdAt: now
+  });
+  await PERIOD_REF.set({ startAt: now });
+  PERIOD_START = now.toDate();
+  closeModal('settleModal');
+  renderDashboard();
+}
+
+// ---------- 履歴 ----------
+async function renderHistory(){
+  const wrap = document.getElementById('historyList');
+  const snap = await db.collection('settlements').orderBy('createdAt','desc').limit(20).get();
+  if(snap.empty){ wrap.innerHTML = '<p class="muted">まだ精算履歴はありません</p>'; return; }
+  wrap.innerHTML = snap.docs.map(d=>{
+    const s = d.data();
+    const rows = Object.entries(s.totals).map(([n,v])=>{
+      if(typeof v === 'number'){ // 旧データ互換
+        return `<div class="settle-row"><span>${esc(n)}</span>
+          <span>${jpy(v * POINT_PER_PENALTY)} P</span></div>`;
+      }
+      return `<div class="settle-row"><span>${esc(n)}</span>
+        <span class="pt-cell"><div>${jpy(v.balance)} P</div>
+        <div class="pt-sub">${v.count}ペナルティ${v.redeemed>0?` ／ 消化 ${jpy(v.redeemed)}P`:''}</div>
+        </span></div>`;
+    }).join('');
+    return `<div class="card">
+      <div class="muted">${fmt(s.periodStart.toDate())} 〜 ${fmt(s.periodEnd.toDate())}</div>
+      ${rows}</div>`;
+  }).join('');
+}
+
+// ---------- Service Worker ----------
+function registerSW(){
+  if(!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('sw.js').then(reg=>{
+    reg.addEventListener('updatefound', ()=>{
+      const nw = reg.installing;
+      nw.addEventListener('statechange', ()=>{
+        if(nw.state==='installed' && navigator.serviceWorker.controller){
+          const b = document.getElementById('updateBanner');
+          b.classList.remove('hidden');
+          b.onclick = ()=>{ nw.postMessage('skipWaiting'); location.reload(); };
+        }
+      });
+    });
+  }).catch(()=>{});
+}
+</script>
+</body>
+</html>
