@@ -67,8 +67,21 @@
     color:var(--text); padding:10px 14px; font-size:15px;}
   .week-nav button:disabled{opacity:.3; cursor:default;}
   .week-now{flex:1; text-align:center;}
-  .week-now .main{font-size:15px; color:var(--amber);}
-  .week-now .sub{font-size:11px; color:var(--text-dim); margin-top:2px;}
+  .week-now .main{font-size:17px; color:var(--amber);}
+  .week-now .sub{font-size:11px; color:var(--text-dim); margin-top:3px;}
+
+  /* 記録中の週バッジ */
+  .editing-badge{display:flex; align-items:center; gap:8px; background:var(--panel2);
+    border:1px solid var(--line); border-radius:8px; padding:9px 11px; font-size:13px;}
+  .editing-badge.past{border-color:var(--amber-dim);}
+  .editing-badge .wk{color:var(--amber); font-size:14px;}
+  .editing-badge .lb{color:var(--text-dim); font-size:11px;}
+
+  /* 先週未記録のお知らせ */
+  .alert-box{background:var(--panel2); border-left:2px solid var(--amber);
+    border-radius:0 8px 8px 0; padding:11px 12px; margin-top:12px;}
+  .alert-box p{margin:0 0 9px; font-size:13px; color:var(--text); line-height:1.6;}
+  .alert-box button{width:100%; background:var(--amber); color:#1a1508; padding:10px; font-size:13px;}
   .week-strip{display:flex; gap:5px; overflow-x:auto; margin-top:10px; padding-bottom:4px;}
   .week-chip{flex:0 0 auto; background:var(--panel2); border:1px solid var(--line);
     border-radius:8px; padding:7px 9px; font-size:11px; color:var(--text-dim);
@@ -181,10 +194,15 @@
 
     <div id="proxyNote" class="proxy-note hidden"></div>
 
-    <!-- 習慣目標 -->
-    <div class="card">
-      <h3 class="sec-head" style="color:var(--amber-dim);">習慣目標</h3>
-      <p class="muted" style="margin:0 0 4px;">週ごとに判定。「失敗」で1ペナルティ（5,000P）が自動加算されます。</p>
+    <!-- 週の選択（習慣目標の記録対象） -->
+    <div class="card" id="weekCard">
+      <h3 class="sec-head" style="color:var(--amber);">どの週を記録しますか？</h3>
+      <p class="muted" style="margin:0 0 2px;">選んだ週に対して、下の習慣目標の達成／失敗を記録します。</p>
+
+      <div class="seg" id="weekQuick" style="margin-top:10px;">
+        <button id="quickLastWeek" onclick="jumpWeek('last')">先週</button>
+        <button id="quickThisWeek" onclick="jumpWeek('this')">今週</button>
+      </div>
 
       <div class="week-nav">
         <button onclick="moveWeek(-1)" aria-label="前の週">◀</button>
@@ -196,8 +214,15 @@
       </div>
       <div class="week-strip" id="weekStrip"></div>
       <p class="muted" id="unrecordedNote" style="margin:10px 0 0;"></p>
+      <div id="lastWeekAlert" class="hidden"></div>
+    </div>
 
-      <div id="habitGoalList" style="margin-top:14px;"></div>
+    <!-- 習慣目標 -->
+    <div class="card">
+      <h3 class="sec-head" style="color:var(--amber-dim);">習慣目標</h3>
+      <p class="muted" style="margin:0 0 10px;">「失敗」で1ペナルティ（5,000P）が自動加算されます。</p>
+      <div id="editingWeekBadge"></div>
+      <div id="habitGoalList" style="margin-top:12px;"></div>
       <div class="btn-row"><button class="btn-ghost" onclick="showAddGoal('habit')">＋ 習慣目標を追加</button></div>
     </div>
 
@@ -207,6 +232,13 @@
       <p class="muted" style="margin:0 0 12px;">期間の終わりに判定。「失敗」で2ペナルティ（10,000P）が自動加算されます。</p>
       <div id="outcomeGoalList"></div>
       <div class="btn-row"><button class="btn-ghost" onclick="showAddGoal('outcome')">＋ 成果目標を追加</button></div>
+    </div>
+
+    <!-- 一覧から外した目標 -->
+    <div class="card hidden" id="hiddenGoalCard">
+      <h3 class="sec-head" style="color:var(--text-dim);">一覧から外した目標</h3>
+      <p class="muted" style="margin:0 0 10px;">「戻す」を押すと、記録できる状態に復活します。</p>
+      <div id="hiddenGoalList"></div>
     </div>
 
     <!-- 消化 -->
@@ -348,6 +380,7 @@ let ME = null;
 let TARGET_UID = null;
 let MEMBERS = {};
 let ALL_GOALS = [];
+let OUTCOME_RECS = {};   // goalId -> 成果目標の記録
 let PERIOD_START = null;
 let SELECTED_WEEK = null;   // 記録対象の週（YYYY-MM-DD、月曜）
 let WEEK_WINDOW = 8;        // 週セレクタに表示する週数
@@ -465,6 +498,13 @@ function recentWeeks(count){
   for(let i = count-1; i >= 0; i--) out.push(shiftWeek(now, -i));
   return out;
 }
+// 選択中の週が今週/先週/それ以前かを短く表す
+function weekSuffix(){
+  const thisWeek = currentWeekStart();
+  if(SELECTED_WEEK === thisWeek) return '（今週）';
+  if(SELECTED_WEEK === shiftWeek(thisWeek, -1)) return '（先週）';
+  return '（過去の週）';
+}
 
 // ---------- 画面切替 ----------
 function switchTab(id){
@@ -482,6 +522,7 @@ async function enterApp(){
   await loadPeriod();
   await loadMembers();
   await loadGoals();
+  await loadOutcomeRecords();
   switchTab('dashView');
 }
 
@@ -501,8 +542,27 @@ async function loadMembers(){
   snap.forEach(d => MEMBERS[d.id] = d.data().name);
 }
 async function loadGoals(){
-  const snap = await db.collection('goals').where('active','==',true).get();
+  // 非表示の目標も含めて取得する（復元機能のため）
+  const snap = await db.collection('goals').get();
   ALL_GOALS = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+}
+
+// 成果目標の記録を読み込む（goalId -> {id, result, ...}）
+// 1目標につき1件だけを正とし、古い重複データがある場合は最新を採用する
+async function loadOutcomeRecords(){
+  const snap = await db.collection('outcomeRecords').get();
+  OUTCOME_RECS = {};
+  snap.docs.map(d=>({ id:d.id, ...d.data() })).forEach(r=>{
+    const cur = OUTCOME_RECS[r.goalId];
+    if(!cur || (r.createdAt && cur.createdAt && r.createdAt.toMillis() > cur.createdAt.toMillis())){
+      OUTCOME_RECS[r.goalId] = r;
+    }
+  });
+}
+
+// 表示対象（非表示にした目標を除く）
+function goalsOf(uid){
+  return ALL_GOALS.filter(g => g.ownerUid === uid && g.active !== false);
 }
 
 // ---------- 集計 ----------
@@ -595,6 +655,7 @@ async function renderDashboard(){
 async function renderRecordView(){
   await loadMembers();
   await loadGoals();
+  await loadOutcomeRecords();
   await loadHabitRecords();
   renderTargetBar();
   renderWeekNav();
@@ -636,13 +697,21 @@ async function loadHabitRecords(){
 
 function renderWeekNav(){
   const thisWeek = currentWeekStart();
+  const lastWeek = shiftWeek(thisWeek, -1);
+
+  // 選択中の週の表示
   document.getElementById('weekMain').textContent = weekRangeLabel(SELECTED_WEEK);
   document.getElementById('weekSub').textContent =
-    SELECTED_WEEK === thisWeek ? '今週' :
-    (SELECTED_WEEK > thisWeek ? '先の週' : `${SELECTED_WEEK} の週`);
+    SELECTED_WEEK === thisWeek ? '今週（月〜日）' :
+    SELECTED_WEEK === lastWeek ? '先週（月〜日）' :
+    `${SELECTED_WEEK.replace(/-/g,'/')} の週`;
   document.getElementById('weekNextBtn').disabled = (SELECTED_WEEK >= thisWeek);
 
-  const habits = ALL_GOALS.filter(g=>g.ownerUid===TARGET_UID && g.type==='habit');
+  // 先週／今週のクイックボタン
+  document.getElementById('quickLastWeek').classList.toggle('active', SELECTED_WEEK === lastWeek);
+  document.getElementById('quickThisWeek').classList.toggle('active', SELECTED_WEEK === thisWeek);
+
+  const habits = goalsOf(TARGET_UID).filter(g=>g.type==='habit');
   const weeks = recentWeeks(WEEK_WINDOW);
   const strip = document.getElementById('weekStrip');
   strip.innerHTML = '';
@@ -660,29 +729,76 @@ function renderWeekNav(){
       return r ? r.result : null;
     });
     let cls = 'dot';
-    if(habits.length === 0)                      cls = 'dot';
-    else if(states.some(s=>s === null))          cls = 'dot';
-    else if(states.every(s=>s === 'success'))    cls = 'dot done';
-    else if(states.every(s=>s === 'fail'))       cls = 'dot miss';
-    else                                          cls = 'dot partial';
+    if(habits.length === 0)                   cls = 'dot';
+    else if(states.some(s=>s === null))       cls = 'dot';
+    else if(states.every(s=>s === 'success')) cls = 'dot done';
+    else if(states.every(s=>s === 'fail'))    cls = 'dot miss';
+    else                                       cls = 'dot partial';
 
     const b = document.createElement('button');
     b.className = 'week-chip' + (w === SELECTED_WEEK ? ' active' : '');
-    b.innerHTML = `<span>${weekShortLabel(w)}</span><span class="${cls}"></span>`;
+    const tail = w === thisWeek ? '今週' : (w === lastWeek ? '先週' : weekShortLabel(w));
+    b.innerHTML = `<span>${tail}</span><span class="${cls}"></span>`;
     b.onclick = ()=>{ SELECTED_WEEK = w; renderWeekNav(); renderGoals(); };
     strip.appendChild(b);
   });
   strip.scrollLeft = strip.scrollWidth;
 
-  // 未記録の週を案内
+  renderEditingBadge();
+
   const note = document.getElementById('unrecordedNote');
-  if(habits.length === 0){ note.textContent = ''; return; }
-  const missing = weeks.filter(w =>
-    habits.some(g => !HABIT_RECS[`${g.id}__${w}`])
-  );
+  const alertBox = document.getElementById('lastWeekAlert');
+
+  if(habits.length === 0){
+    note.textContent = '';
+    alertBox.classList.add('hidden');
+    alertBox.innerHTML = '';
+    return;
+  }
+
+  // 未記録の週の案内
+  const missing = weeks.filter(w => habits.some(g => !HABIT_RECS[`${g.id}__${w}`]));
   note.innerHTML = missing.length
-    ? `直近${WEEK_WINDOW}週のうち <span style="color:var(--amber)">${missing.length}週</span> が未記録です（${missing.map(weekShortLabel).join('、')}）`
+    ? `直近${WEEK_WINDOW}週のうち <span style="color:var(--amber)">${missing.length}週</span> が未記録です（${missing.map(w=> w===thisWeek?'今週':(w===lastWeek?'先週':weekShortLabel(w))).join('、')}）`
     : `直近${WEEK_WINDOW}週はすべて記録済みです`;
+
+  // 先週が未記録なら目立つ案内を出す（月曜以降に先週分を入れる想定）
+  const lastWeekMissing = habits.filter(g => !HABIT_RECS[`${g.id}__${lastWeek}`]);
+  if(lastWeekMissing.length > 0 && SELECTED_WEEK !== lastWeek){
+    alertBox.className = 'alert-box';
+    alertBox.innerHTML = `
+      <p>先週（${weekRangeLabel(lastWeek)}）が未記録です。
+      ${isProxy() ? esc(nameOf(TARGET_UID)) + 'さんの' : ''}習慣目標 ${lastWeekMissing.length} 件が残っています。</p>
+      <button onclick="jumpWeek('last')">先週の記録に切り替える</button>`;
+  } else {
+    alertBox.classList.add('hidden');
+    alertBox.innerHTML = '';
+  }
+}
+
+// 習慣目標カードに「いまどの週を記録しているか」を常時表示
+function renderEditingBadge(){
+  const thisWeek = currentWeekStart();
+  const lastWeek = shiftWeek(thisWeek, -1);
+  const isPast = SELECTED_WEEK < thisWeek;
+  const label = SELECTED_WEEK === thisWeek ? '今週'
+              : SELECTED_WEEK === lastWeek ? '先週'
+              : '過去の週';
+  document.getElementById('editingWeekBadge').innerHTML = `
+    <div class="editing-badge ${isPast ? 'past' : ''}">
+      <span class="lb">記録する週</span>
+      <span class="wk">${weekRangeLabel(SELECTED_WEEK)}</span>
+      <span class="lb">（${label}）</span>
+    </div>`;
+}
+
+// 先週／今週へ一発で移動
+function jumpWeek(which){
+  const thisWeek = currentWeekStart();
+  SELECTED_WEEK = which === 'last' ? shiftWeek(thisWeek, -1) : thisWeek;
+  renderWeekNav();
+  renderGoals();
+  document.getElementById('editingWeekBadge').scrollIntoView({ behavior:'smooth', block:'center' });
 }
 
 function moveWeek(n){
@@ -733,7 +849,7 @@ async function deleteGoal(id){
 function renderGoals(){
   const hWrap = document.getElementById('habitGoalList');
   const oWrap = document.getElementById('outcomeGoalList');
-  const goals = ALL_GOALS.filter(g=>g.ownerUid === TARGET_UID);
+  const goals = goalsOf(TARGET_UID);
   const habits = goals.filter(g=>g.type==='habit');
   const outcomes = goals.filter(g=>g.type==='outcome');
 
@@ -746,7 +862,7 @@ function renderGoals(){
                               : '<span class="tag outcome">失敗 +1</span>');
     return `<div class="goal-item">
       <div class="top"><span>${esc(g.title)}</span>${state}</div>
-      <div class="sub-label">${weekRangeLabel(SELECTED_WEEK)} の週の判定</div>
+      <div class="sub-label">${weekRangeLabel(SELECTED_WEEK)} の週${weekSuffix()}</div>
       <div class="status-buttons">
         <button class="ok-btn ${r&&r.result==='success'?'chosen-ok':''}" onclick="recordHabit('${g.id}','success')">達成</button>
         <button class="fail-btn ${r&&r.result==='fail'?'chosen-fail':''}" onclick="recordHabit('${g.id}','fail')">失敗</button>
@@ -756,16 +872,53 @@ function renderGoals(){
     </div>`;
   }).join('') : '<p class="muted">まだ習慣目標がありません</p>';
 
-  oWrap.innerHTML = outcomes.length ? outcomes.map(g=>`
-    <div class="goal-item">
-      <div class="top"><span>${esc(g.title)}</span><span class="tag outcome">成果</span></div>
-      <div class="sub-label">結果が出たら記録してください（記録すると一覧から外れます）</div>
+  oWrap.innerHTML = outcomes.length ? outcomes.map(g=>{
+    const r = OUTCOME_RECS[g.id];
+    const state = !r ? '<span class="tag outcome">結果待ち</span>'
+      : (r.result==='success' ? '<span class="tag done">達成</span>'
+                              : '<span class="tag outcome">失敗 +2</span>');
+    const by = (r && r.enteredByUid && r.enteredByUid !== g.ownerUid)
+      ? `<div class="sub-label">${esc(nameOf(r.enteredByUid))}が入力</div>` : '';
+    const hint = r
+      ? '記録済みです。間違えた場合は押し直すと訂正できます。'
+      : '結果が出たら記録してください。';
+    return `<div class="goal-item">
+      <div class="top"><span>${esc(g.title)}</span>${state}</div>
+      <div class="sub-label">${hint}</div>
       <div class="status-buttons">
-        <button class="ok-btn" onclick="recordOutcome('${g.id}','success')">達成</button>
-        <button class="fail-btn" onclick="recordOutcome('${g.id}','fail')">失敗（+2）</button>
+        <button class="ok-btn ${r&&r.result==='success'?'chosen-ok':''}" onclick="recordOutcome('${g.id}','success')">達成</button>
+        <button class="fail-btn ${r&&r.result==='fail'?'chosen-fail':''}" onclick="recordOutcome('${g.id}','fail')">失敗（+2）</button>
       </div>
+      ${by}
       <button class="link-danger" onclick="deleteGoal('${g.id}')">この目標を外す</button>
-    </div>`).join('') : '<p class="muted">まだ成果目標がありません</p>';
+    </div>`;
+  }).join('') : '<p class="muted">まだ成果目標がありません</p>';
+
+  renderHiddenGoals();
+}
+
+// 一覧から外した目標を復元できるようにする
+function renderHiddenGoals(){
+  const wrap = document.getElementById('hiddenGoalList');
+  const hidden = ALL_GOALS.filter(g => g.ownerUid === TARGET_UID && g.active === false);
+  if(!hidden.length){
+    wrap.innerHTML = '';
+    document.getElementById('hiddenGoalCard').classList.add('hidden');
+    return;
+  }
+  document.getElementById('hiddenGoalCard').classList.remove('hidden');
+  wrap.innerHTML = hidden.map(g=>`
+    <div class="log-row">
+      <span>${esc(g.title)} <span class="tag ${g.type==='outcome'?'outcome':''}">${g.type==='habit'?'習慣':'成果'}</span></span>
+      <button class="btn-ghost" style="padding:6px 10px;font-size:12px;" onclick="restoreGoal('${g.id}')">戻す</button>
+    </div>`).join('');
+}
+
+async function restoreGoal(id){
+  await db.collection('goals').doc(id).update({ active:true });
+  await loadGoals();
+  renderWeekNav();
+  renderGoals();
 }
 
 async function recordHabit(goalId, result){
@@ -775,7 +928,7 @@ async function recordHabit(goalId, result){
 
   if(result === 'fail'){
     const who = isProxy() ? `${nameOf(TARGET_UID)}さんの` : '';
-    if(!confirm(`${who}${weekRangeLabel(SELECTED_WEEK)} の週を「失敗」として記録します。\n1ペナルティ（${jpy(POINT_PER_PENALTY)}P）が加算されます。よろしいですか？`)) return;
+    if(!confirm(`${who}${weekRangeLabel(SELECTED_WEEK)}${weekSuffix()} を「失敗」として記録します。\n1ペナルティ（${jpy(POINT_PER_PENALTY)}P）が加算されます。よろしいですか？`)) return;
   }
 
   const docId = `${TARGET_UID}_${goalId}_${SELECTED_WEEK}`;
@@ -796,20 +949,45 @@ async function recordHabit(goalId, result){
 }
 
 async function recordOutcome(goalId, result){
+  const prev = OUTCOME_RECS[goalId];
+  if(prev && prev.result === result) return; // 変更なし
+
   const who = isProxy() ? `${nameOf(TARGET_UID)}さんの` : '';
-  const msg = result==='success'
-    ? `${who}成果目標を「達成」として記録します。よろしいですか？`
-    : `${who}成果目標を「失敗」として記録します。\n2ペナルティ（${jpy(OUTCOME_PENALTY*POINT_PER_PENALTY)}P）が加算されます。よろしいですか？`;
+  let msg;
+  if(prev){
+    // すでに記録済み → 訂正
+    const from = prev.result === 'success' ? '達成' : '失敗';
+    const to   = result === 'success' ? '達成' : '失敗';
+    msg = `${who}成果目標の記録を「${from}」から「${to}」に訂正します。\n`
+        + (result === 'fail'
+            ? `2ペナルティ（${jpy(OUTCOME_PENALTY*POINT_PER_PENALTY)}P）が加算されます。`
+            : `加算されていた2ペナルティ（${jpy(OUTCOME_PENALTY*POINT_PER_PENALTY)}P）が取り消されます。`)
+        + `\nよろしいですか？`;
+  } else {
+    msg = result==='success'
+      ? `${who}成果目標を「達成」として記録します。よろしいですか？`
+      : `${who}成果目標を「失敗」として記録します。\n2ペナルティ（${jpy(OUTCOME_PENALTY*POINT_PER_PENALTY)}P）が加算されます。よろしいですか？`;
+  }
   if(!confirm(msg)) return;
-  await db.collection('outcomeRecords').add({
+
+  const data = {
     goalId,
     ownerUid: TARGET_UID,
     enteredByUid: ME.uid,
     result,
-    createdAt: firebase.firestore.Timestamp.now()
-  });
-  await db.collection('goals').doc(goalId).update({ active:false });
-  await loadGoals();
+    createdAt: prev && prev.createdAt ? prev.createdAt : firebase.firestore.Timestamp.now(),
+    updatedAt: firebase.firestore.Timestamp.now()
+  };
+
+  if(prev){
+    // 既存の記録を書き換える（新規追加しないので二重加算にならない）
+    await db.collection('outcomeRecords').doc(prev.id).set(data);
+  } else {
+    // 1目標につき1件になるようIDを固定する
+    await db.collection('outcomeRecords').doc(`${TARGET_UID}_${goalId}`).set(data);
+  }
+
+  await loadOutcomeRecords();
   renderGoals();
   renderLedgerLogs();
 }
@@ -940,6 +1118,7 @@ async function renderLedgerLogs(){
 async function renderAll(){
   await loadMembers();
   await loadGoals();
+  await loadOutcomeRecords();
   const week = currentWeekStart();
   document.getElementById('allWeekLabel').textContent =
     `今週（${weekRangeLabel(week)}）の習慣目標`;
@@ -951,7 +1130,7 @@ async function renderAll(){
 
   const wrap = document.getElementById('allList');
   wrap.innerHTML = Object.keys(MEMBERS).map(uid=>{
-    const goals = ALL_GOALS.filter(g=>g.ownerUid===uid);
+    const goals = goalsOf(uid);
     const rows = goals.length ? goals.map(g=>{
       let st = '<span class="muted">未記録</span>';
       if(g.type==='habit'){
@@ -959,7 +1138,10 @@ async function renderAll(){
         if(r==='success')   st = '<span style="color:var(--ok)">達成</span>';
         else if(r==='fail') st = '<span style="color:var(--fail)">失敗</span>';
       } else {
-        st = '<span class="muted">結果待ち</span>';
+        const r = OUTCOME_RECS[g.id];
+        if(!r)                    st = '<span class="muted">結果待ち</span>';
+        else if(r.result==='success') st = '<span style="color:var(--ok)">達成</span>';
+        else                      st = '<span style="color:var(--fail)">失敗</span>';
       }
       return `<div class="row"><span style="font-size:13px">${esc(g.title)}
         <span class="tag ${g.type==='outcome'?'outcome':''}">${g.type==='habit'?'習慣':'成果'}</span></span>
